@@ -9,7 +9,7 @@ The key logger listens to all keypresses in OS X through the Cocoa API using Pyt
 
 Once returned the Google Form is updated using a service called Cloudstitch.
 
-![Productivity Tracker Sheet](http://i.imgur.com/8IcasFv.png)
+![Productivity Tracker Sheet](http://i.imgur.com/JmHGY1Y.png)
 
 ## References
 
