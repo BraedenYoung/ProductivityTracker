@@ -1,18 +1,17 @@
 
-import datetime
 import os
 import signal
 import subprocess
 import sys
-import time
 import urllib
 import urllib2
 
-from dateutil import tz
 from scapy.all import *
+from termcolor import colored
 
-
-MAGIC_FORM_URL = 'http://api.cloudstitch.com/braedenyoung/magic-form-2/datasources/sheet'
+from date_util import *
+from local_settings import MAGIC_FORM_URL
+from log_file_reader import get_recent_log
 
 
 currently_working = False
@@ -22,12 +21,11 @@ process = None
 
 
 def arp_display(pkt):
-    if pkt[ARP].op == 1: #who-has (request)
+    if pkt[ARP].op == 1:
         if pkt[ARP].psrc == '0.0.0.0': # ARP Probe
-            print "ARP Probe from: " + pkt[ARP].hwsrc
+            print "ARP Probe from: ", colored(pkt[ARP].hwsrc, 'blue')
 
-            if pkt[ARP].hwsrc == 'a0:02:dc:e5:3b:d6': # Amazon Elements
-                print "Pressed!"
+            if pkt[ARP].hwsrc in ['a0:02:dc:e5:3b:d6', '74:c2:46:74:e1:8d']: # Amazon Elements, ON Nutrition
                 record_event()
             else:
                 print "ARP Probe from unknown device: " + pkt[ARP].hwsrc
@@ -42,13 +40,19 @@ def main_loop():
 def record_event():
     global currently_working, previous_time, keypress_count
 
-    print 'Recording the event'
+    print colored('Recording the event', 'green')
 
     current_time = datetime.datetime.utcnow()
 
-    time_difference = ''
+    time_difference = None
+    task_log = None
 
     if currently_working:
+        # Ensure that the log file has been updated, the time recorded, and keylogger stopped.
+        task_log = get_recent_log()
+        if not task_log:
+            return
+
         time_difference = get_time_delta(current_time, previous_time)
         keypress_count = stop_keylogger()
 
@@ -62,8 +66,12 @@ def record_event():
         'Event': 'Started Working' if not currently_working else 'Finished working',
         'Number of Keypresses': keypress_count,
         'Time Worked': time_difference,
+        'Task': task_log if currently_working else '',
     }
     currently_working = False if currently_working else True
+
+    if keypress_count > 0:
+        print 'Key presses: {key_presses}, time worked: {time}'.format(key_presses=keypress_count, time=time_difference)
 
     response = urllib2.urlopen(MAGIC_FORM_URL, data=urllib.urlencode(data))
 
@@ -83,28 +91,12 @@ def stop_keylogger():
     return result
 
 
-def get_time_delta(current, previous):
-    return strfdelta((current - previous),
-    '{minutes}') if previous else ''
-
-
-def format_and_localize_time(time_value):
-    time_value = time_value.replace(tzinfo=tz.tzutc())
-    localized_time = time_value.astimezone(tz.tzlocal())
-
-    return localized_time.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def strfdelta(tdelta, fmt):
-    d = {"days": tdelta.days}
-    d["hours"], rem = divmod(tdelta.seconds, 3600)
-    d["minutes"], d["seconds"] = divmod(rem, 60)
-    return fmt.format(**d)
-
-
 if __name__ == '__main__':
     try:
         main_loop()
     except KeyboardInterrupt:
         print >> sys.stderr, '\nExiting by user request.\n'
+        if currently_working:
+            process.send_signal(signal.SIGUSR1)
+            process.wait()
         sys.exit(0)
